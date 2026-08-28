@@ -1,171 +1,214 @@
-import pandas as pd
+import csv
+from datetime import datetime
 import streamlit as st
 
 # 페이지 기본 설정
 st.set_page_config(
-    page_title="서울 기온 역대 순위 검색기",
+    page_title="서울 기온 순위 검색기",
     page_icon="🌡️",
-    layout="wide"
+    layout="centered"
 )
 
-# 데이터 로드 및 전처리 함수 (캐싱 적용으로 빠른 실행)
-@st.cache_data
-def load_data():
-    df = pd.read_csv("seoul.csv")
-    # 날짜 공백 제거 및 datetime 변환
-    df["날짜"] = df["날짜"].astype(str).str.strip()
-    df["날짜"] = pd.to_datetime(df["날짜"])
-    df = df.dropna(subset=["날짜"]).sort_values("날짜").reset_index(drop=True)
-    return df
-
-df = load_data()
-
-# 커스텀 CSS 스타일링
+# 커스텀 CSS 적용 (깔끔하고 예쁜 UI 스타일링)
 st.markdown("""
-    <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        border-radius: 12px;
-        padding: 20px;
+<style>
+    .main-title {
         text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
     }
-    .metric-title {
-        font-size: 1.1rem;
-        font-weight: bold;
-        color: #31333F;
-        margin-bottom: 8px;
+    .sub-title {
+        text-align: center;
+        color: #666;
+        margin-bottom: 2rem;
     }
-    .metric-value {
-        font-size: 2rem;
+    .metric-card {
+        background-color: #f8f9fa;
+        border-radius: 12px;
+        padding: 1.5rem;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        border: 1px solid #eee;
+    }
+    .highlight-rank {
+        font-size: 2.5rem;
         font-weight: 800;
         color: #ff4b4b;
+        margin: 0.5rem 0;
     }
-    .metric-rank {
-        font-size: 1.2rem;
+    .stat-label {
+        font-size: 0.95rem;
+        color: #555;
+    }
+    .stat-value {
+        font-size: 1.4rem;
         font-weight: 600;
-        color: #1f77b4;
-        margin-top: 5px;
     }
-    .sub-text {
-        font-size: 0.85rem;
-        color: #666;
-    }
-    </style>
+</style>
 """, unsafe_allow_html=True)
 
-# 헤더 영역
-st.title("🌡️ 서울 기온 역대 순위 검색기")
-st.caption("선택하신 기간의 기온이 역대 서울 기온 기록 중 몇 위인지 분석합니다.")
 
-min_date = df["날짜"].min().date()
-max_date = df["날짜"].max().date()
+@st.cache_data
+def load_data(file_path):
+    """표준 csv 라이브러리를 사용하여 seoul.csv 데이터를 로드하고 파싱"""
+    records = []
+    with open(file_path, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                # 날짜 파싱 (YYYY-MM-DD)
+                date_str = row['날짜'].strip()
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
 
-# 날짜 선택 영역
-st.subheader("📅 조회할 기간을 선택하세요")
-col_date1, col_date2 = st.columns(2)
+                # 기온 데이터 파싱
+                avg_temp = float(row['평균기온(℃)']) if row['평균기온(℃)'] else None
+                min_temp = float(row['최저기온(℃)']) if row['최저기온(℃)'] else None
+                max_temp = float(row['최고기온(℃)']) if row['최고기온(℃)'] else None
 
-with col_date1:
-    selected_range = st.date_input(
-        "달력에서 기간 선택 (시작일과 종료일을 순서대로 클릭)",
-        value=(max_date.replace(year=max_date.year - 1), max_date),
-        min_value=min_date,
-        max_value=max_date
+                if avg_temp is not None:
+                    records.append({
+                        'date': date_obj,
+                        'avg_temp': avg_temp,
+                        'min_temp': min_temp,
+                        'max_temp': max_temp
+                    })
+            except (ValueError, KeyError):
+                # 데이터 결측치 또는 헤더 오류 처리
+                continue
+    return records
+
+
+# 데이터 불러오기
+try:
+    data = load_data('seoul.csv')
+except FileNotFoundError:
+    st.error("`seoul.csv` 파일을 찾을 수 없습니다. 깃허브 저장소에 파일이 올바르게 업로드되었는지 확인해주세요.")
+    st.stop()
+
+if not data:
+    st.error("데이터를 불러올 수 없거나 형식이 올바르지 않습니다.")
+    st.stop()
+
+# 데이터셋 전체 기간 정보 추출
+min_date = min(r['date'] for r in data)
+max_date = max(r['date'] for r in data)
+total_days = len(data)
+
+# 앱 타이틀 영역
+st.markdown("<h1 class='main-title'>🌡️ 서울 역대 기온 순위 조회</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-title'>달력에서 원하는 날짜를 선택하여 해당 날짜의 기온 순위를 확인해보세요.</p>", unsafe_allow_html=True)
+
+# sidebar: 선택 방식 및 옵션
+with st.sidebar:
+    st.header("⚙️ 검색 설정")
+    metric_type = st.radio(
+        "기준 기온 선택",
+        ["평균기온", "최고기온", "최저기온"],
+        help="순위를 매길 기온 항목을 선택합니다."
     )
-
-# 기간 선택 검증
-if isinstance(selected_range, tuple) and len(selected_range) == 2:
-    start_date, end_date = selected_range
     
-    if start_date > end_date:
-        st.error("시작일은 종료일보다 이전이어야 합니다.")
-    else:
-        # 선택한 기간 계산
-        days_count = (end_date - start_date).days + 1
-        
-        # 선택 기간 데이터 추출
-        mask = (df["날짜"].dt.date >= start_date) & (df["날짜"].dt.date <= end_date)
-        selected_df = df.loc[mask]
-        
-        if len(selected_df) == 0 or selected_df["평균기온"].isna().all():
-            st.warning("선택한 기간에 유효한 기온 데이터가 없습니다.")
-        else:
-            # 선택한 기간의 평균값 계산
-            user_avg_temp = selected_df["평균기온"].mean()
-            user_min_temp = selected_df["최저기온"].mean()
-            user_max_temp = selected_df["최고기온"].mean()
+    st.markdown("---")
+    st.caption(f"📅 **데이터 수집 기간**\n{min_date} ~ {max_date}")
+    st.caption(f"📊 **총 데이터 수**: {total_days:,}일")
 
-            # 동일 일수(N일) 슬라이딩 윈도우 방식으로 전체 기간 순위 계산
-            df_temp = df.copy()
-            
-            # 이동평균을 활용하여 N일 간의 평균 구하기
-            df_temp["rolling_avg"] = df_temp["평균기온"].rolling(window=days_count).mean()
-            df_temp["rolling_min"] = df_temp["최저기온"].rolling(window=days_count).mean()
-            df_temp["rolling_max"] = df_temp["최고기온"].rolling(window=days_count).mean()
-            
-            valid_periods = df_temp.dropna(subset=["rolling_avg"]).copy()
-            total_periods = len(valid_periods)
+# 기온 타입 매핑
+metric_key = {
+    "평균기온": "avg_temp",
+    "최고기온": "max_temp",
+    "최저기온": "min_temp"
+}[metric_type]
 
-            # 순위 계산 (더운 순)
-            avg_rank = (valid_periods["rolling_avg"] > user_avg_temp).sum() + 1
-            min_rank = (valid_periods["rolling_min"] > user_min_temp).sum() + 1
-            max_rank = (valid_periods["rolling_max"] > user_max_temp).sum() + 1
+# 메인 화면: 기간 선택 영역
+st.subheader("📅 기간 선택")
+selected_dates = st.date_input(
+    "조회할 단일 날짜 또는 기간을 지정하세요",
+    value=(max_date, max_date),
+    min_value=min_date,
+    max_value=max_date,
+    format="YYYY-MM-DD"
+)
 
-            # 백분위 계산
-            avg_top_pct = (avg_rank / total_periods) * 100
-
-            st.markdown("---")
-            
-            # 요약 메시지
-            st.success(f"**선택 기간:** {start_date} ~ {end_date} (총 **{days_count}일간**)")
-            
-            # 요약 강조 박스
-            if avg_top_pct <= 10:
-                st.fire(f"🔥 이 기간은 역대 상위 **{avg_top_pct:.1f}%**에 해당하는 매우 무더운 기간이었습니다!")
-            elif avg_top_pct >= 90:
-                st.snowflake(f"❄️ 이 기간은 역대 하위 **{100 - avg_top_pct:.1f}%**에 해당하는 매우 추운 기간이었습니다!")
-
-            # 카드 형태로 메트릭 표시
-            c1, c2, c3 = st.columns(3)
-            
-            with c1:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">🔥 평균기온 (평균)</div>
-                    <div class="metric-value">{user_avg_temp:.1f} °C</div>
-                    <div class="metric-rank">역대 {avg_rank:,}위 <span class="sub-text">(상위 {avg_top_pct:.1f}%)</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-            with c2:
-                min_top_pct = (min_rank / total_periods) * 100
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">🌙 최저기온 (평균)</div>
-                    <div class="metric-value">{user_min_temp:.1f} °C</div>
-                    <div class="metric-rank">역대 {min_rank:,}위 <span class="sub-text">(상위 {min_top_pct:.1f}%)</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-            with c3:
-                max_top_pct = (max_rank / total_periods) * 100
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">☀️ 최고기온 (평균)</div>
-                    <div class="metric-value">{user_max_temp:.1f} °C</div>
-                    <div class="metric-rank">역대 {max_rank:,}위 <span class="sub-text">(상위 {max_top_pct:.1f}%)</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.markdown("---")
-            
-            # 상세 일자별 기온 데이터 및 차트 제공
-            st.subheader("📈 해당 기간 일자별 기온 추이")
-            chart_data = selected_df.set_index("날짜")[["평균기온", "최저기온", "최고기온"]]
-            st.line_chart(chart_data)
-
-            with st.expander("📄 선택한 기간의 일별 데이터 보기"):
-                st.dataframe(selected_df[["날짜", "평균기온", "최저기온", "최고기온"]].reset_index(drop=True), use_container_width=True)
-
+# 날짜 선택 검증
+start_date, end_date = None, None
+if isinstance(selected_dates, tuple) or isinstance(selected_dates, list):
+    if len(selected_dates) == 2:
+        start_date, end_date = selected_dates
+    elif len(selected_dates) == 1:
+        start_date = end_date = selected_dates[0]
 else:
-    st.info("💡 달력에서 두 번째 날짜까지 클릭하여 기간을 선택해 주세요.")
+    start_date = end_date = selected_dates
+
+if start_date and end_date:
+    # 해당 기간 동안의 데이터 필터링
+    filtered_records = [r for r in data if start_date <= r['date'] <= end_date]
+    
+    if not filtered_records:
+        st.warning("선택한 기간에 해당하는 데이터가 없습니다.")
+    else:
+        # 선택 기간 내 통계 산출
+        temps = [r[metric_key] for r in filtered_records if r[metric_key] is not None]
+        
+        if not temps:
+            st.warning("선택한 기간의 기온 데이터가 유효하지 않습니다.")
+        else:
+            period_avg = sum(temps) / len(temps)
+            period_max = max(temps)
+            period_min = min(temps)
+            
+            # 전체 역대 데이터 정렬 (내림차순, 오름차순)
+            all_temps = [r[metric_key] for r in data if r[metric_key] is not None]
+            all_temps_desc = sorted(all_temps, reverse=True)
+            all_temps_asc = sorted(all_temps)
+            
+            # 높은 순위 (더웠던 순), 낮은 순위 (추웠던 순) 계산
+            rank_high = sum(1 for t in all_temps_desc if t > period_avg) + 1
+            rank_low = sum(1 for t in all_temps_asc if t < period_avg) + 1
+            
+            top_percent_high = (rank_high / len(all_temps)) * 100
+            top_percent_low = (rank_low / len(all_temps)) * 100
+
+            st.markdown("---")
+            st.subheader("📊 순위 분석 결과")
+            
+            # 기간 표시
+            if start_date == end_date:
+                st.markdown(f"**선택일:** `{start_date}`")
+            else:
+                st.markdown(f"**선택 기간:** `{start_date}` ~ `{end_date}` ({len(filtered_records)}일간)")
+
+            # 주요 지표 강조 영역 (컬럼 배치)
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="stat-label">🔥 역대 고온 순위</div>
+                    <div class="highlight-rank">{rank_high:,} 위</div>
+                    <div class="stat-label">상위 <b>{top_percent_high:.2f}%</b> (더웠던 날)</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col2:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="stat-label">❄️ 역대 저온 순위</div>
+                    <div class="highlight-rank" style="color:#2b6cb0;">{rank_low:,} 위</div>
+                    <div class="stat-label">상위 <b>{top_percent_low:.2f}%</b> (추웠던 날)</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            st.write("")
+            
+            # 선택 기간 세부 정보 카드
+            st.markdown("### 🌡️ 기간 내 기온 상세")
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            metric_col1.metric("기간 평균", f"{period_avg:.1f} ℃")
+            metric_col2.metric("기간 최고", f"{period_max:.1f} ℃")
+            metric_col3.metric("기간 최저", f"{period_min:.1f} ℃")
+
+            # 대중적인 인사이트 제공 메세지
+            st.info(
+                f"💡 선택하신 기간의 **{metric_type} 평균({period_avg:.1f}℃)**은 "
+                f"전체 관측 역사({len(all_temps):,}일) 중 **{rank_high:,}번째로 높은 기온**입니다."
+            )
